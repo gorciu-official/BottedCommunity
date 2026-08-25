@@ -21,4 +21,5 @@ export interface ChatMessage {
 export default abstract class ChatBackend {
     abstract init(token: string): Promise<void>;
     abstract setMessageHandler(handler: (msg: ChatMessage) => unknown): void;
+    abstract getUsername(): Promise<string>;
 }

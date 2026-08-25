@@ -28,6 +28,10 @@ export default class BottedMember {
     private aiSettings: AISettings;
     private chatSettings: ChatSettings;
 
+    private typingState = new Map<string, {
+        newerMessageSent: boolean;
+    }>();
+
     public constructor(options: BottedMemberOptions) {
         this.aiBackend = options.backends.ai;
         this.chatBackend = options.backends.chat;
@@ -58,42 +62,45 @@ export default class BottedMember {
         }
     }
 
-    private isAllowed(msg: ChatMessage): boolean {
+    private isChannelAllowed(channelId: string): boolean {
         if (this.chatSettings.allowedChannels == '*')
             return true;
 
-        if (!this.chatSettings.allowedChannels.includes(msg.channel.id))
+        if (!this.chatSettings.allowedChannels.includes(channelId))
             return false;
 
         return true;
     }
 
+    // TODO: move message handler from init to a separate function
     public async init() {
-        const generating = new Map<string, {
-            newerMessage: ChatMessage | null;
-        }>();
 
-        await new Promise<void>((r) => r());
+        await Promise.resolve();
+
+        console.log(`Bot attached to account @${await this.chatBackend.getUsername()}`);
 
         this.chatBackend.setMessageHandler(async (msg) => {
-            if (msg.author.id !== msg.externalInformation.selfUserId)
-                for (const state of generating.values()) {
-                    state.newerMessage = msg;
-                }
+            if (msg.author.id !== msg.externalInformation.selfUserId) {
+                for (const state of this.typingState.values()) 
+                    state.newerMessageSent = true;
+            }
 
             if (
+                // if this is the user itself, we should not reply to ourselves
+                // for I think obvious reasons
                 msg.author.id === msg.externalInformation.selfUserId ||
-                !this.isAllowed(msg) ||
+                // check if channel is allowed
+                !this.isChannelAllowed(msg.channel.id) ||
+                // if there is no text, there is nothing to reply to 
                 !msg.text ||
+                // if this is a clear bot that requires the message to start with a specific
+                // identifier, require it  
                 (this.chatSettings.mustStartWith && !msg.text.startsWith(this.chatSettings.mustStartWith)) ||
+                // global ai killswitch for this project (kinda)
                 msg.text.startsWith('\\no-ai-reply ')
             ) return;
 
-            const state = {
-                newerMessage: null 
-            };
-
-            generating.set(msg.id, state);
+            this.typingState.set(msg.id, { newerMessageSent: false });
 
             try {
                 const response = await this.aiBackend.generateResponse({
@@ -129,14 +136,14 @@ export default class BottedMember {
                         lastSentMessage = await msg.reply(singularText);
                         first = false;
                         continue;
-                    } else if (state.newerMessage) {
+                    } else if (this.typingState.get(msg.id)?.newerMessageSent) {
                         lastSentMessage = await lastSentMessage!.reply(singularText);
 
-                        state.newerMessage = null;
+                        this.typingState.set(msg.id, { newerMessageSent: false });
                     } else lastSentMessage = await msg.channel.send(singularText);
                 }
             } finally {
-                generating.delete(msg.id);
+                this.typingState.delete(msg.id);
             }
         });
     }

@@ -21,6 +21,11 @@ export default class DiscordBotChatBackend extends ChatBackend {
         await this.client.login(token);
     }
 
+    override async getUsername(): Promise<string> {
+        await Promise.resolve();
+        return this.client.user!.username;
+    }
+
     private transformMsg(msg: Message): ChatMessage {
         return { 
             text: msg.content, id: msg.id,
