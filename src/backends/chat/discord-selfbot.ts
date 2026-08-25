@@ -35,6 +35,7 @@ export default class DiscordSelfbotChatBackend extends ChatBackend {
                 },
                 fetchContext: async (size) => {
                     const collection = await msg.channel.messages.fetch({ limit: size });
+                    collection.reverse();
                     return collection
                         .values()
                         .toArray()
