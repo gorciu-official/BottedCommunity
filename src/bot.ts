@@ -215,7 +215,7 @@ export default class BottedMember {
             
             if (!this.loggedIn || this.updatingLoginState) return;
 
-            const neededTime = singularText.split(' ').length * 0.5 * 1000;
+            const neededTime = singularText.split(' ').length * 0.8 * 1000;
             await this.waitNeededTime(
                 neededTime, () => channel.sendTyping(),
                 this.chatSettings.sendTypingInterval
