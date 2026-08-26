@@ -3,14 +3,25 @@ import ChatBackend, { ChatMessage } from "./common.ts";
 
 export default class DiscordSelfbotChatBackend extends ChatBackend {
     private client: Client;
+    private token: string = null!;
 
     constructor() {
         super();
         this.client = new Client();
     }
 
-    override async init(token: string): Promise<void> {
-        await this.client.login(token);
+    override async login(): Promise<void> {
+        await this.client.login(this.token);
+    }
+
+    override logout(): Promise<void> {
+        this.client.destroy();
+        return Promise.resolve();
+    }
+
+    override init(token: string): Promise<void> {
+        this.token = token;
+        return Promise.resolve();
     }
 
     override async getUsername(): Promise<string> {
@@ -23,6 +34,7 @@ export default class DiscordSelfbotChatBackend extends ChatBackend {
             text: msg.content, id: msg.id,
             author: { id: msg.author.id, username: msg.author.username, displayName: msg.member?.displayName ?? msg.author.displayName },
             externalInformation: { selfUserId: msg.client.user!.id },
+            userMentions: msg.mentions.users.keys().toArray(),
             channel: {
                 id: msg.channel.id,
                 sendTyping: () => {

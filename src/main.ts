@@ -6,31 +6,13 @@ import DiscordBotChatBackend from "./backends/chat/discord-bot.ts";
 import DiscordSelfbotChatBackend from "./backends/chat/discord-selfbot.ts";
 
 import BottedMember from "./bot.ts";
+import { BottedMemberConfig } from "./config.ts";
 
 import process from 'node:process';
 
 process.on('uncaughtException', (e) => {
     console.error(e.stack ?? e.message);
 })
-
-interface BottedMemberConfig {
-    authentication: {
-        ai: string,
-        chat: string
-    },
-    chat: {
-        selectedBackend: 'discord/bot' | 'discord/selfbot',
-        filters: {
-            allowedChannels: string[] | '*',
-            mustStartWith?: string
-        }
-    },
-    ai: {
-        selectedBackend: 'google',
-        submodel: string,
-        systemPromptFile: string
-    }
-}
 
 class BottedCommunityDriver {
     getChatBackend(id: BottedMemberConfig['chat']['selectedBackend']): ChatBackend {
@@ -72,6 +54,7 @@ class BottedCommunityDriver {
                     chat: chatBackend,
                     ai: aiBackend
                 },
+                general: config.general,
                 chat: {
                     allowedChannels: config.chat.filters.allowedChannels,
                     mustStartWith: config.chat.filters.mustStartWith 

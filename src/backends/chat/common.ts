@@ -6,7 +6,8 @@ export interface ChatMessage {
         sendTyping: () => void,
         send: (msg: string) => Promise<ChatMessage>,
         fetchContext: (size: number) => Promise<ChatMessage[]>
-    }
+    },
+    userMentions: string[],
     author: {
         id: string;
         displayName: string;
@@ -22,4 +23,6 @@ export default abstract class ChatBackend {
     abstract init(token: string): Promise<void>;
     abstract setMessageHandler(handler: (msg: ChatMessage) => unknown): void;
     abstract getUsername(): Promise<string>;
+    abstract login(): Promise<void>;
+    abstract logout(): Promise<void>;
 }

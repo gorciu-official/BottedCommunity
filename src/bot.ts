@@ -1,5 +1,6 @@
 import AIBackend from "./backends/ai/common.ts";
 import ChatBackend, { ChatMessage } from "./backends/chat/common.ts";
+import { BottedMemberConfig } from "./config.ts";
 
 interface AISettings {
     systemPrompt: string[],
@@ -14,7 +15,8 @@ interface ChatSettings {
 
 export interface BottedMemberOptions {
     ai: AISettings,
-    chat: ChatSettings
+    chat: ChatSettings,
+    general: BottedMemberConfig['general'],
     backends: {
         chat: ChatBackend,
         ai: AIBackend
@@ -28,6 +30,15 @@ export default class BottedMember {
     private aiSettings: AISettings;
     private chatSettings: ChatSettings;
 
+    private generalSettings: BottedMemberConfig['general'];
+    private lastActiveChannel: ChatMessage['channel'] | null = null;
+
+    private loggedIn = false;
+    private updatingLoginState = false;
+    private lastBotMessageAt = 0;
+    private lastLogoutAt = 0;
+
+    private chattingWith: string[] = [];
     private typingState = new Map<string, {
         newerMessageSent: boolean;
     }>();
@@ -38,6 +49,43 @@ export default class BottedMember {
 
         this.aiSettings = options.ai;
         this.chatSettings = options.chat;
+
+        this.generalSettings = options.general;
+    }
+
+    private parseTime(time: string): number {
+        const [hours, minutes, seconds] = time.split(':').map(Number);
+    
+        return (
+            hours * 60 * 60 * 1000 +
+            minutes * 60 * 1000 +
+            seconds * 1000
+        );
+    }
+
+    private withinActivityHours(): boolean {
+        const now = new Date();
+    
+        const current =
+            now.getHours() * 60 * 60 * 1000 +
+            now.getMinutes() * 60 * 1000 +
+            now.getSeconds() * 1000;
+    
+        const masterStart = this.parseTime(this.generalSettings.activityHours.master.start);
+        const masterEnd = this.parseTime(this.generalSettings.activityHours.master.end);
+    
+        if (current < masterStart || current > masterEnd)
+            return false;
+    
+        for (const exclude of this.generalSettings.activityHours.excludes) {
+            const excludeStart = this.parseTime(exclude.start);
+            const excludeEnd = this.parseTime(exclude.end);
+    
+            if (current >= excludeStart && current <= excludeEnd)
+                return false;
+        }
+    
+        return true;
     }
     
     // this function was vibecoded
@@ -62,6 +110,72 @@ export default class BottedMember {
         }
     }
 
+    private async updateLoginState(): Promise<void> {
+        const shouldBeActive = this.withinActivityHours();
+
+        if (this.updatingLoginState) return;
+    
+        if (!shouldBeActive) {
+            if (this.loggedIn) {
+                this.updatingLoginState = true;
+
+                const username = await this.chatBackend.getUsername();
+                await this.chatBackend.logout();
+    
+                this.loggedIn = false;
+                this.lastLogoutAt = Date.now();
+    
+                console.log(`Logged out @${username} - outside of activity hours`);
+                
+                this.updatingLoginState = false;
+            }
+    
+            return;
+        }
+    
+        if (!this.loggedIn) {
+            // immediatte login-after-logout prevention
+            if (
+                this.lastLogoutAt !== 0 &&
+                Date.now() - this.lastLogoutAt < this.generalSettings.loginAfter
+            ) {
+                return;
+            }
+    
+            this.updatingLoginState = true;
+
+            await this.chatBackend.login();
+            const username = await this.chatBackend.getUsername();
+    
+            this.loggedIn = true;
+            this.chattingWith = [];
+            this.updatingLoginState = false;
+    
+            console.log(`Logged in @${username}`);
+    
+            if (this.generalSettings.sendHiMessageAfterLogin) {
+                await this.sendHiMessage();
+            }
+    
+            return;
+        }
+    
+        if (
+            this.lastBotMessageAt !== 0 &&
+            Date.now() - this.lastBotMessageAt >= this.generalSettings.logoutAfter
+        ) {
+            this.updatingLoginState = true;
+            const username = await this.chatBackend.getUsername();
+            await this.chatBackend.logout();
+    
+            this.loggedIn = false;
+            this.lastLogoutAt = Date.now();
+            this.updatingLoginState = false;
+    
+            console.log(`Logged out @${username} - inactive for too long`);
+        }
+    }
+
     private isChannelAllowed(channelId: string): boolean {
         if (this.chatSettings.allowedChannels == '*')
             return true;
@@ -72,12 +186,69 @@ export default class BottedMember {
         return true;
     }
 
+    private async sendHiMessage(): Promise<void> {
+        if (!this.lastActiveChannel)
+            return;
+    
+        const response = await this.aiBackend.generateResponse({
+            prompt: 'hi',
+            systemPrompt: this.aiSettings.systemPrompt.join('\n'),
+            context: await this.lastActiveChannel.fetchContext(20),
+            submodel: this.aiSettings.submodel
+        });
+    
+        if (!response)
+            return;
+    
+        await this.sendMessage(response, this.lastActiveChannel);
+    }
+
+    private async sendMessage(
+        contents: string, channel: ChatMessage['channel'], msg?: ChatMessage
+    ) {
+        let first = true;
+        let lastSentMessage: ChatMessage | null = null;
+
+        for (const singularText of contents.split('\n')) {
+            if (!singularText.trim())
+                continue;
+            
+            if (!this.loggedIn || this.updatingLoginState) return;
+
+            const neededTime = singularText.split(' ').length * 0.5 * 1000;
+            await this.waitNeededTime(
+                neededTime, () => channel.sendTyping(),
+                this.chatSettings.sendTypingInterval
+            );
+            
+            this.lastBotMessageAt = Date.now();
+
+            if (!this.loggedIn || this.updatingLoginState) return;
+
+            if (first && msg) {
+                lastSentMessage = await msg.reply(singularText);
+                first = false;
+                continue;
+            } else if (msg && this.typingState.get(msg.id)?.newerMessageSent) {
+                lastSentMessage = await lastSentMessage!.reply(singularText);
+
+                this.typingState.set(msg.id, { newerMessageSent: false });
+            } else lastSentMessage = await channel.send(singularText);
+        }
+    }
+
     // TODO: move message handler from init to a separate function
     public async init() {
-
         await Promise.resolve();
 
-        console.log(`Bot attached to account @${await this.chatBackend.getUsername()}`);
+        await this.updateLoginState();
+        
+        setInterval(
+            () => {
+                this.updateLoginState();
+            },
+            500
+        );
 
         this.chatBackend.setMessageHandler(async (msg) => {
             if (msg.author.id !== msg.externalInformation.selfUserId) {
@@ -100,7 +271,17 @@ export default class BottedMember {
                 msg.text.startsWith('\\no-ai-reply ')
             ) return;
 
+            if (
+                !(Math.random() < (this.generalSettings.idleActivityMeter / 100)) &&
+                !this.chattingWith.includes(msg.author.id) &&
+                !msg.userMentions.includes(msg.externalInformation.selfUserId)
+            ) return console.log('Activity meter - ignored message', msg.text);
+
             this.typingState.set(msg.id, { newerMessageSent: false });
+
+            if (!this.chattingWith.includes(msg.author.id)) {
+                this.chattingWith.push(msg.author.id);
+            }
 
             try {
                 const response = await this.aiBackend.generateResponse({
@@ -117,31 +298,8 @@ export default class BottedMember {
                     return;
                 }
 
-                let first = true;
-                let lastSentMessage: ChatMessage | null = null;
-
-                for (const singularText of response.split('\n')) {
-                    if (!singularText.trim())
-                        continue;
-
-                    const neededTime =
-                        singularText.split(' ').length * 0.5 * 1000;
-
-                    await this.waitNeededTime(
-                        neededTime, () => msg.channel.sendTyping(),
-                        this.chatSettings.sendTypingInterval
-                    );
-
-                    if (first) {
-                        lastSentMessage = await msg.reply(singularText);
-                        first = false;
-                        continue;
-                    } else if (this.typingState.get(msg.id)?.newerMessageSent) {
-                        lastSentMessage = await lastSentMessage!.reply(singularText);
-
-                        this.typingState.set(msg.id, { newerMessageSent: false });
-                    } else lastSentMessage = await msg.channel.send(singularText);
-                }
+                await this.sendMessage(response, msg.channel, msg);
+                this.lastActiveChannel = msg.channel;
             } finally {
                 this.typingState.delete(msg.id);
             }
