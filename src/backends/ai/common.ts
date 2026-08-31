@@ -1,10 +1,13 @@
 import { ChatMessage } from "../chat/common.ts";
 
+export interface AITool {}
+
 export interface AIGenerateResponseOptions {
     prompt: string,
     systemPrompt: string,
     submodel: string,
-    context: ChatMessage[]
+    context: ChatMessage[],
+    tools: AITool[]
 }
 
 export default abstract class AIBackend {

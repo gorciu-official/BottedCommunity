@@ -25,4 +25,8 @@ export default abstract class ChatBackend {
     abstract getUsername(): Promise<string>;
     abstract login(): Promise<void>;
     abstract logout(): Promise<void>;
+
+    protected pingToDesc(username: string, displayName: string, id: string) {
+        return `[PING: ${displayName} (${username}), id: ${id}]`;
+    }
 }

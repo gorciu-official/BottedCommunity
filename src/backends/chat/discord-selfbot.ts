@@ -31,7 +31,18 @@ export default class DiscordSelfbotChatBackend extends ChatBackend {
 
     private transformMsg(msg: Message): ChatMessage {
         return { 
-            text: msg.content, id: msg.id,
+            text: 
+                msg.content.replaceAll(
+                    /<@!?(?<id>\d{17,20})>/g, (found) => {
+                        const member = msg.mentions.members?.get(found);
+                        if (!member) return `<@${found}>`;
+
+                        const res = this.pingToDesc(found, member.displayName, member.user.username);
+                        console.log(res);
+                        return res;
+                    }
+                ), 
+            id: msg.id,
             author: { id: msg.author.id, username: msg.author.username, displayName: msg.member?.displayName ?? msg.author.displayName },
             externalInformation: { selfUserId: msg.client.user!.id },
             userMentions: msg.mentions.users.keys().toArray(),

@@ -194,7 +194,8 @@ export default class BottedMember {
             prompt: 'hi',
             systemPrompt: this.aiSettings.systemPrompt.join('\n'),
             context: await this.lastActiveChannel.fetchContext(20),
-            submodel: this.aiSettings.submodel
+            submodel: this.aiSettings.submodel,
+            tools: []
         });
     
         if (!response)
@@ -206,6 +207,9 @@ export default class BottedMember {
     private async sendMessage(
         contents: string, channel: ChatMessage['channel'], msg?: ChatMessage
     ) {
+        if (contents.includes('---ignore-message'))
+            return console.log('Model volountairly decided to not generate a response for message.');
+
         let first = true;
         let lastSentMessage: ChatMessage | null = null;
 
@@ -288,7 +292,8 @@ export default class BottedMember {
                     prompt: msg.text,
                     systemPrompt: this.aiSettings.systemPrompt.join('\n'),
                     context: await msg.channel.fetchContext(20),
-                    submodel: this.aiSettings.submodel
+                    submodel: this.aiSettings.submodel,
+                    tools: []
                 });
 
                 if (!response) {
